@@ -1,0 +1,42 @@
+scalar Time
+
+type Post {
+  id: ID!
+  title: String!
+  content: String!
+  commentsAllowed: Boolean!
+  comments(first: Int, after: String): CommentConnection!
+}
+
+type Comment {
+  id: ID!
+  postID: ID!
+  text: String!
+  parentID: ID
+  createdAt: Time!
+}
+
+type CommentEdge {
+  cursor: String!
+  node: Comment!
+}
+
+type CommentConnection {
+  edges: [CommentEdge!]!
+  endCursor: String
+  hasNextPage: Boolean!
+}
+
+type Query {
+  posts: [Post!]!
+  post(id: ID!, first: Int, after: String): Post
+}
+
+type Mutation {
+  createPost(title: String!, content: String!, commentsAllowed: Boolean!): Post!
+  createComment(postID: ID!, parentID: ID, text: String!): Comment!
+}
+
+type Subscription {
+  commentAdded(postID: ID!): Comment!
+}
