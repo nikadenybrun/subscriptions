@@ -8,6 +8,8 @@ import (
 	"subscriptions/internal/graphql/graph"
 	"subscriptions/internal/graphql/graph/model"
 	"subscriptions/internal/lib/logger/handlers/slogpretty"
+	"subscriptions/internal/services/comments"
+	"subscriptions/internal/services/posts"
 	"subscriptions/internal/storage/postgres"
 	"syscall"
 
@@ -29,6 +31,7 @@ const (
 	limit       = rate.Limit(1000)
 	burst       = 1000
 	defaultPort = "8080"
+	storageType = "in-memory"
 )
 
 func main() {
@@ -42,13 +45,20 @@ func main() {
 	if port == "" {
 		port = defaultPort
 	}
+	// var storage Storage
+	// if storageType == "in-memory" {
+	// 	storage := inmemory.NewInMemoryStorage()
+	// } else {
 	storage, err := postgres.InitDB(cfg.StoragePath, cfg.DBSaver)
 	if err != nil {
 		log.Error("failed to initialize database", err)
 	}
 	defer storage.CloseDB()
+	// }
 
-	srv := handler.New(graph.NewExecutableSchema(graph.Config{Resolvers: &graph.Resolver{Logger: log, CommentAddedNotification: make(chan *model.Comment, 1), Storage: storage}}))
+	post := &posts.Posts{}
+	comment := &comments.Comments{}
+	srv := handler.New(graph.NewExecutableSchema(graph.Config{Resolvers: &graph.Resolver{Logger: log, CommentAddedNotification: make(chan *model.Comment, 1), Storage: storage, Post_: post, Comment_: comment}}))
 	srv.AddTransport(transport.Options{})
 	srv.AddTransport(transport.GET{})
 	srv.AddTransport(transport.POST{})

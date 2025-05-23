@@ -15,20 +15,18 @@ import (
 	"time"
 
 	"golang.org/x/exp/slog"
-
-	"github.com/google/uuid"
 )
 
 //go:generate go run github.com/vektra/mockery/v2@v2.40.2 --name=Post
 type Post interface {
-	SavePost(ctx context.Context, s *postgres.Storage) (string, error)
 	GetAll(ctx context.Context, s *postgres.Storage) ([]posts.Posts, error)
 	GetPost(ctx context.Context, s *postgres.Storage, id string) (*posts.Posts, error)
+	SavePost(ctx context.Context, s *postgres.Storage, p *model.Post) (string, error)
 }
 
 //go:generate go run github.com/vektra/mockery/v2@v2.40.2 --name=Comment
 type Comment interface {
-	SaveComment(ctx context.Context, s *postgres.Storage) (string, error)
+	SaveComment(ctx context.Context, s *postgres.Storage, c *model.Comment) (string, error)
 	GetComments(ctx context.Context, s *postgres.Storage, postId string, first *int32, after *string) ([]comments.Comments, string, bool, error)
 	CheckCommentId(ctx context.Context, s *postgres.Storage, comtId string) error
 }
@@ -37,17 +35,18 @@ type Comment interface {
 func (r *mutationResolver) CreatePost(ctx context.Context, title string, content string, commentsAllowed bool) (*model.Post, error) {
 	const op = "graph.schema.resolvers.CreatePost"
 	// var ps posts.Posts
-	r.Post_.Title = title
-	r.Post_.Content = content
-	r.Post_.CommentsAllowed = commentsAllowed
-	r.Post_.ID = uuid.New().String()
-
-	postId, err := r.Post_.SavePost(ctx, r.Storage)
+	// r.Post_.Title = title
+	// r.Post_.Content = content
+	// r.Post_.CommentsAllowed = commentsAllowed
+	// r.Post_.ID = uuid.New().String()
+	p := &model.Post{Title: title, Content: content, CommentsAllowed: commentsAllowed}
+	postId, err := r.Post_.SavePost(ctx, r.Storage, p)
 	if err != nil {
 		r.Logger.Error("Failed to save post", err, op)
-		return nil, fmt.Errorf("%s: failed to update balance: %w", op, err)
+		return nil, fmt.Errorf("%s: Failed to save post: %w", op, err)
 	}
-	return &model.Post{ID: postId, Title: r.Post_.Title, Content: r.Post_.Content, CommentsAllowed: r.Post_.CommentsAllowed}, nil
+	p.ID = postId
+	return p, nil
 }
 
 // CreateComment is the resolver for the createComment field.
@@ -57,9 +56,9 @@ func (r *mutationResolver) CreateComment(ctx context.Context, postID string, par
 		r.Logger.Error("Comment length must be <= 2000 letters", op)
 		return nil, fmt.Errorf("%s: Comment length must be <= 2000 letters", op)
 	}
-	var com comments.Comments
+
 	var err error
-	r.Post_, err = posts.GetPost(ctx, r.Storage, postID)
+	post, err := r.Post_.GetPost(ctx, r.Storage, postID)
 	if err != nil {
 		if strings.Contains(err.Error(), "post not found") {
 			r.Logger.Error("You try to leave comment on non existing post", op)
@@ -68,13 +67,15 @@ func (r *mutationResolver) CreateComment(ctx context.Context, postID string, par
 		r.Logger.Error("Didnt manage to check post's existance: %w", op, err)
 		return nil, fmt.Errorf("%s: Didnt manage to check post's existance: %w", op, err)
 	}
-	if !r.Post_.CommentsAllowed {
+	if !post.CommentsAllowed {
 		r.Logger.Info("You try to leave comment on post that doesnt allow it", op)
 		return nil, fmt.Errorf("%s: ou try to leave comment on post that doesnt allow it", op)
 	}
-	com.PostID = postID
+	createdAt := time.Now()
+	comment := model.Comment{PostID: postID, Text: text, CreatedAt: createdAt}
+	// com.PostID = postID
 	if parentID != nil {
-		err = comments.CheckCommentId(ctx, r.Storage, *parentID)
+		err = r.Comment_.CheckCommentId(ctx, r.Storage, *parentID)
 		if err != nil {
 			if strings.Contains(err.Error(), "comment not found") {
 				r.Logger.Error("You try to leave answer on non existing comment", op)
@@ -83,22 +84,17 @@ func (r *mutationResolver) CreateComment(ctx context.Context, postID string, par
 			r.Logger.Error("Didnt manage to check comment's existance: %w", op, err)
 			return nil, fmt.Errorf("%s: Didnt manage to check comment's existance: %w", op, err)
 		}
-		com.ParentID = *parentID
+		comment.ParentID = parentID
 	}
-	com.CreatedAt = time.Now()
-	com.Text = text
-	com.ID = uuid.New().String()
-	CommentId, err := com.SaveComment(ctx, r.Storage)
+	CommentId, err := r.Comment_.SaveComment(ctx, r.Storage, &comment)
+	comment.ID = CommentId
 	if err != nil {
 		r.Logger.Error("Failed to save comment", err, op)
 		return nil, fmt.Errorf("%s: failed to create balance: %w", op, err)
 	}
-
-	comment := model.Comment{ID: CommentId, PostID: com.PostID, ParentID: &com.ParentID, Text: com.Text, CreatedAt: com.CreatedAt}
 	go func() {
 		r.CommentAddedNotification <- &comment
 	}()
-	// r.PubSub.Publish("commentAdded:"+comment.PostID, comment)
 	return &comment, nil
 }
 
@@ -107,7 +103,7 @@ func (r *queryResolver) Posts(ctx context.Context) ([]*model.Post, error) {
 	const op = "graph.schema.resolvers.Posts"
 	var resultPosts []*model.Post
 	var dbPosts []posts.Posts
-	dbPosts, err := posts.GetAll(ctx, r.Storage)
+	dbPosts, err := r.Post_.GetAll(ctx, r.Storage)
 	if err != nil {
 		r.Logger.Error("Failed to get posts", err, op)
 		return nil, fmt.Errorf("%s: failed to get posts: %w", op, err)
@@ -124,12 +120,12 @@ func (r *queryResolver) Post(ctx context.Context, id string, first *int32, after
 	r.Logger.Info("Fetching post", slog.String("postID", id))
 	// var resultPost *model.Post
 	var err error
-	r.Post_, err = posts.GetPost(ctx, r.Storage, id)
+	post, err := r.Post_.GetPost(ctx, r.Storage, id)
 	if err != nil {
 		r.Logger.Error("Failed to get post", slog.String("postID", id), err, op)
 		return nil, fmt.Errorf("%s: failed to get posts: %w", op, err)
 	}
-	dbComms, endCursor, hasNextpage, err := comments.GetComments(ctx, r.Storage, id, first, after)
+	dbComms, endCursor, hasNextpage, err := r.Comment_.GetComments(ctx, r.Storage, id, first, after)
 	if err != nil {
 		r.Logger.Error("Failed to get comments", slog.String("postID", id), err, op)
 		return nil, fmt.Errorf("%s: failed to get posts: %w", op, err)
@@ -152,7 +148,7 @@ func (r *queryResolver) Post(ctx context.Context, id string, first *int32, after
 		EndCursor:   &endCursor,
 		HasNextPage: hasNextpage,
 	}
-	resultPost := &model.Post{ID: r.Post_.ID, Title: r.Post_.Title, Content: r.Post_.Content, CommentsAllowed: r.Post_.CommentsAllowed, Comments: comments}
+	resultPost := &model.Post{ID: post.ID, Title: post.Title, Content: post.Content, CommentsAllowed: post.CommentsAllowed, Comments: comments}
 	return resultPost, nil
 }
 

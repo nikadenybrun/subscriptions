@@ -12,6 +12,7 @@ import (
 	"subscriptions/internal/storage/postgres"
 
 	"github.com/go-pg/pg/v10"
+	"github.com/google/uuid"
 )
 
 const maxRetries = 5
@@ -24,10 +25,12 @@ type Posts struct {
 	// Comments        []model.Comment
 }
 
-func (link *Posts) SavePost(ctx context.Context, s *postgres.Storage) (string, error) {
+func (link *Posts) SavePost(ctx context.Context, s *postgres.Storage, p *model.Post) (string, error) {
 	const op = "storage.postgres.SavePost"
 
 	var err error
+	link.Title, link.Content, link.CommentsAllowed = p.Title, p.Content, p.CommentsAllowed
+	link.ID = uuid.New().String()
 	for i := 0; i < maxRetries; i++ {
 		err = s.Db.RunInTransaction(ctx, func(tx *pg.Tx) error {
 			_, err := tx.Model(link).Insert()
@@ -47,7 +50,7 @@ func (link *Posts) SavePost(ctx context.Context, s *postgres.Storage) (string, e
 	return "", fmt.Errorf("insert failed after %d retries: %w", maxRetries, err)
 }
 
-func GetAll(ctx context.Context, s *postgres.Storage) ([]Posts, error) {
+func (link *Posts) GetAll(ctx context.Context, s *postgres.Storage) ([]Posts, error) {
 	var posts []Posts
 	op := "GetAll"
 	var err error
@@ -73,7 +76,7 @@ func GetAll(ctx context.Context, s *postgres.Storage) ([]Posts, error) {
 	return nil, fmt.Errorf("%s: exceeded max retries, last error: %w", op, err)
 }
 
-func GetPost(ctx context.Context, s *postgres.Storage, id string) (*Posts, error) {
+func (link *Posts) GetPost(ctx context.Context, s *postgres.Storage, id string) (*Posts, error) {
 	op := "GetPost"
 	var err error
 	var post Posts

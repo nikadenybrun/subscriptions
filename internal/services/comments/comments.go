@@ -7,10 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"subscriptions/internal/graphql/graph/model"
 	"subscriptions/internal/storage"
 	"subscriptions/internal/storage/postgres"
 
 	"github.com/go-pg/pg/v10"
+	"github.com/google/uuid"
 )
 
 const maxRetries = 5
@@ -23,9 +25,10 @@ type Comments struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-func (com *Comments) SaveComment(ctx context.Context, s *postgres.Storage) (string, error) {
+func (com *Comments) SaveComment(ctx context.Context, s *postgres.Storage, c *model.Comment) (string, error) {
 	const op = "storage.postgres.SavePost"
-
+	com.PostID, com.Text, com.ParentID, com.CreatedAt = c.PostID, c.Text, *c.ParentID, c.CreatedAt
+	com.ID = uuid.New().String()
 	var err error
 	for i := 0; i < maxRetries; i++ {
 		err = s.Db.RunInTransaction(ctx, func(tx *pg.Tx) error {
@@ -50,7 +53,7 @@ func (com *Comments) SaveComment(ctx context.Context, s *postgres.Storage) (stri
 	return "", fmt.Errorf("insert failed after %d retries: %w", maxRetries, err)
 }
 
-func GetComments(ctx context.Context, s *postgres.Storage, postId string, first *int32, after *string) ([]Comments, string, bool, error) {
+func (com *Comments) GetComments(ctx context.Context, s *postgres.Storage, postId string, first *int32, after *string) ([]Comments, string, bool, error) {
 	op := "GetComments"
 	var err error
 	var coms []Comments
@@ -91,7 +94,7 @@ func GetComments(ctx context.Context, s *postgres.Storage, postId string, first 
 	return nil, "", false, fmt.Errorf("update balance failed after %d retries: %w", maxRetries, err, op)
 }
 
-func CheckCommentId(ctx context.Context, s *postgres.Storage, comtId string) error {
+func (com *Comments) CheckCommentId(ctx context.Context, s *postgres.Storage, comtId string) error {
 	op := "CheckCommentId"
 	var err error
 	var coms Comments
