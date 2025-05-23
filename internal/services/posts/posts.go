@@ -9,7 +9,7 @@ import (
 
 	"subscriptions/internal/graphql/graph/model"
 	"subscriptions/internal/storage"
-	database "subscriptions/internal/storage/postgres"
+	"subscriptions/internal/storage/postgres"
 
 	"github.com/go-pg/pg/v10"
 )
@@ -24,12 +24,12 @@ type Posts struct {
 	// Comments        []model.Comment
 }
 
-func (link *Posts) SavePost(ctx context.Context) (string, error) {
+func (link *Posts) SavePost(ctx context.Context, s *postgres.Storage) (string, error) {
 	const op = "storage.postgres.SavePost"
 
 	var err error
 	for i := 0; i < maxRetries; i++ {
-		err = database.Db.RunInTransaction(ctx, func(tx *pg.Tx) error {
+		err = s.Db.RunInTransaction(ctx, func(tx *pg.Tx) error {
 			_, err := tx.Model(link).Insert()
 			if err != nil {
 				return fmt.Errorf("%s: failed to insert: %w", op, err)
@@ -47,12 +47,12 @@ func (link *Posts) SavePost(ctx context.Context) (string, error) {
 	return "", fmt.Errorf("insert failed after %d retries: %w", maxRetries, err)
 }
 
-func GetAll(ctx context.Context) ([]Posts, error) {
+func GetAll(ctx context.Context, s *postgres.Storage) ([]Posts, error) {
 	var posts []Posts
 	op := "GetAll"
 	var err error
 	for i := 0; i < maxRetries; i++ {
-		err := database.Db.RunInTransaction(ctx, func(tx *pg.Tx) error {
+		err := s.Db.RunInTransaction(ctx, func(tx *pg.Tx) error {
 			err := tx.Model(&posts).Select()
 			if err != nil {
 				if errors.Is(err, pg.ErrNoRows) {
@@ -73,13 +73,13 @@ func GetAll(ctx context.Context) ([]Posts, error) {
 	return nil, fmt.Errorf("%s: exceeded max retries, last error: %w", op, err)
 }
 
-func GetPost(ctx context.Context, id string) (*Posts, error) {
+func GetPost(ctx context.Context, s *postgres.Storage, id string) (*Posts, error) {
 	op := "GetPost"
 	var err error
 	var post Posts
 	var comments []model.Comment
 	for i := 0; i < maxRetries; i++ {
-		err := database.Db.RunInTransaction(ctx, func(tx *pg.Tx) error {
+		err := s.Db.RunInTransaction(ctx, func(tx *pg.Tx) error {
 			err := tx.Model(&post).Where("id = ?", id).Select()
 			if err != nil {
 				if errors.Is(err, pg.ErrNoRows) {
@@ -98,7 +98,7 @@ func GetPost(ctx context.Context, id string) (*Posts, error) {
 		time.Sleep(time.Duration(i*i) * 100 * time.Millisecond)
 	}
 	for i := 0; i < maxRetries; i++ {
-		err := database.Db.RunInTransaction(ctx, func(tx *pg.Tx) error {
+		err := s.Db.RunInTransaction(ctx, func(tx *pg.Tx) error {
 			err := tx.Model(&comments).Where("post_id = ?", post.ID).Order("created_at ASC").Select()
 			if err != nil {
 				if errors.Is(err, pg.ErrNoRows) {

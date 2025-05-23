@@ -42,13 +42,13 @@ func main() {
 	if port == "" {
 		port = defaultPort
 	}
-
-	if err := postgres.InitDB(cfg.StoragePath, cfg.DBSaver); err != nil {
+	storage, err := postgres.InitDB(cfg.StoragePath, cfg.DBSaver)
+	if err != nil {
 		log.Error("failed to initialize database", err)
 	}
-	defer postgres.CloseDB()
+	defer storage.CloseDB()
 
-	srv := handler.New(graph.NewExecutableSchema(graph.Config{Resolvers: &graph.Resolver{Logger: log, CommentAddedNotification: make(chan *model.Comment, 1)}}))
+	srv := handler.New(graph.NewExecutableSchema(graph.Config{Resolvers: &graph.Resolver{Logger: log, CommentAddedNotification: make(chan *model.Comment, 1), Storage: storage}}))
 	srv.AddTransport(transport.Options{})
 	srv.AddTransport(transport.GET{})
 	srv.AddTransport(transport.POST{})

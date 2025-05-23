@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"subscriptions/internal/storage"
-	database "subscriptions/internal/storage/postgres"
+	"subscriptions/internal/storage/postgres"
 
 	"github.com/go-pg/pg/v10"
 )
@@ -23,12 +23,12 @@ type Comments struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-func (com *Comments) SaveComment(ctx context.Context) (string, error) {
+func (com *Comments) SaveComment(ctx context.Context, s *postgres.Storage) (string, error) {
 	const op = "storage.postgres.SavePost"
 
 	var err error
 	for i := 0; i < maxRetries; i++ {
-		err = database.Db.RunInTransaction(ctx, func(tx *pg.Tx) error {
+		err = s.Db.RunInTransaction(ctx, func(tx *pg.Tx) error {
 			_, err := tx.Model(com).Insert()
 			if err != nil {
 				return fmt.Errorf("%s: failed to insert: %w", op, err)
@@ -50,13 +50,13 @@ func (com *Comments) SaveComment(ctx context.Context) (string, error) {
 	return "", fmt.Errorf("insert failed after %d retries: %w", maxRetries, err)
 }
 
-func GetComments(ctx context.Context, postId string, first *int32, after *string) ([]Comments, string, bool, error) {
+func GetComments(ctx context.Context, s *postgres.Storage, postId string, first *int32, after *string) ([]Comments, string, bool, error) {
 	op := "GetComments"
 	var err error
 	var coms []Comments
 	var endCursor string
 	for i := 0; i < maxRetries; i++ {
-		err := database.Db.RunInTransaction(ctx, func(tx *pg.Tx) error {
+		err := s.Db.RunInTransaction(ctx, func(tx *pg.Tx) error {
 			query := tx.Model(&coms).Where("post_id = ?", postId).Order("created_at ASC").Limit(int(*first))
 			if after != nil && *after != "" {
 				var afterComment Comments
@@ -91,12 +91,12 @@ func GetComments(ctx context.Context, postId string, first *int32, after *string
 	return nil, "", false, fmt.Errorf("update balance failed after %d retries: %w", maxRetries, err, op)
 }
 
-func CheckCommentId(ctx context.Context, comtId string) error {
+func CheckCommentId(ctx context.Context, s *postgres.Storage, comtId string) error {
 	op := "CheckCommentId"
 	var err error
 	var coms Comments
 	for i := 0; i < maxRetries; i++ {
-		err := database.Db.RunInTransaction(ctx, func(tx *pg.Tx) error {
+		err := s.Db.RunInTransaction(ctx, func(tx *pg.Tx) error {
 			err := tx.Model(&coms).Where("id = ?", comtId).Select()
 			if err != nil {
 				if errors.Is(err, pg.ErrNoRows) {

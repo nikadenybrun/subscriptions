@@ -14,9 +14,11 @@ import (
 
 const maxRetries = 5
 
-var Db *pg.DB
+type Storage struct {
+	Db *pg.DB
+}
 
-func InitDB(storagePath string, cfg config.DBSaver) error {
+func InitDB(storagePath string, cfg config.DBSaver) (*Storage, error) {
 	const op = "storage.postgres.New"
 
 	conn := pg.Connect(&pg.Options{
@@ -34,17 +36,18 @@ func InitDB(storagePath string, cfg config.DBSaver) error {
 		time.Sleep(1 * time.Second)
 	}
 	if err != nil {
-		return fmt.Errorf("failed to ping database: %w", err)
+		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
-
-	Db = conn
-	if err := migrateSchema(); err != nil {
-		return fmt.Errorf("failed to migrate schema: %w", err)
+	obj := &Storage{
+		Db: conn,
 	}
-	return nil
+	if err := obj.migrateSchema(); err != nil {
+		return nil, fmt.Errorf("failed to migrate schema: %w", err)
+	}
+	return obj, nil
 }
 
-func migrateSchema() error {
+func (s *Storage) migrateSchema() error {
 	schemas := []interface{}{
 		(*models.Posts)(nil),
 		(*models.Comments)(nil),
@@ -53,7 +56,7 @@ func migrateSchema() error {
 	op := orm.CreateTableOptions{IfNotExists: true}
 
 	for _, schema := range schemas {
-		if err := Db.Model(schema).CreateTable(&op); err != nil {
+		if err := s.Db.Model(schema).CreateTable(&op); err != nil {
 			return fmt.Errorf("failed to create table: %w", err)
 		}
 	}
@@ -61,8 +64,8 @@ func migrateSchema() error {
 	return nil
 }
 
-func CloseDB() error {
-	return Db.Close()
+func (s *Storage) CloseDB() error {
+	return s.Db.Close()
 }
 
 func isRetryableError(err error) bool {
