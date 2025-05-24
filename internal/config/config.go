@@ -14,7 +14,8 @@ type Config struct {
 	StoragePath string `env:"STORAGE_PATH"`
 	HTTPServer
 	DBSaver
-	AppPort string `env:"APP_PORT"`
+	AppPort     string `env:"APP_PORT"`
+	StorageType string `env:"STORAGE_TYPE"`
 }
 
 type HTTPServer struct {
@@ -36,11 +37,13 @@ type DBSaver struct {
 func MustLoad() *Config {
 
 	configPath := os.Getenv("CONFIG_PATH")
-
+	storageType := os.Getenv("STORAGE_TYPE")
 	if configPath == "" {
 		log.Fatal("CONFIG_PATH is not set")
 	}
-
+	if storageType == "" {
+		log.Fatal("STORAGE_TYPE is not set")
+	}
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		log.Fatalf("config file does not exist: %s", configPath)
 	}
@@ -50,6 +53,7 @@ func MustLoad() *Config {
 	if err := cleanenv.ReadConfig(configPath, &cfg); err != nil {
 		log.Fatalf("cannot read config: %s", err)
 	}
+	cfg.StorageType = storageType
 	fmt.Println(cfg)
 
 	return &cfg

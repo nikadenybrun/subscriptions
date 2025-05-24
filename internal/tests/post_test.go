@@ -3,11 +3,10 @@ package services_test
 import (
 	"fmt"
 	"io"
+	models "subscriptions/internal/domain"
 	"subscriptions/internal/graphql/graph"
 	generated "subscriptions/internal/graphql/graph"
 	"subscriptions/internal/graphql/graph/mocks"
-	"subscriptions/internal/services/comments"
-	"subscriptions/internal/services/posts"
 	"subscriptions/internal/storage/postgres"
 	"testing"
 	"time"
@@ -21,8 +20,8 @@ import (
 
 func TestMutationResolver_CreatePost(t *testing.T) {
 	t.Run("should create post correctly", func(t *testing.T) {
-		mockPost := mocks.NewPost(t)
-		mockPost.On("SavePost", mock.Anything, mock.Anything, mock.Anything).Return("test-id", nil)
+		mockPost := mocks.NewPostInterface(t)
+		mockPost.On("SavePost", mock.Anything, mock.Anything).Return("test-id", nil)
 		resolver := &graph.Resolver{
 			Post_:   mockPost,
 			Storage: new(postgres.Storage),
@@ -56,22 +55,18 @@ func TestMutationResolver_CreatePost(t *testing.T) {
 }
 func TestQueryResolver_Posts(t *testing.T) {
 	t.Run("should return all posts correctly", func(t *testing.T) {
-		mockPost := mocks.NewPost(t)
+		mockPost := mocks.NewPostInterface(t)
 
-		// Подготавливаем тестовые данные, которые вернет мок
-		mockPosts := []posts.Posts{
+		mockPosts := []models.Post{
 			{ID: "id1", Title: "Title1", Content: "Content1", CommentsAllowed: true},
 			{ID: "id2", Title: "Title2", Content: "Content2", CommentsAllowed: false},
 		}
-
-		// Ожидаем вызов GetAll и возвращаем mockPosts без ошибки
-		mockPost.On("GetAll", mock.Anything, mock.Anything).Return(mockPosts, nil)
+		mockPost.On("GetAll", mock.Anything).Return(&mockPosts, nil)
 
 		resolver := &graph.Resolver{
 			Post_:   mockPost,
 			Storage: new(postgres.Storage),
 		}
-
 		c := client.New(handler.NewDefaultServer(generated.NewExecutableSchema(generated.Config{Resolvers: resolver})))
 
 		var resp struct {
@@ -82,7 +77,6 @@ func TestQueryResolver_Posts(t *testing.T) {
 				CommentsAllowed bool
 			}
 		}
-
 		query := `
 			query {
 				posts {
@@ -93,18 +87,13 @@ func TestQueryResolver_Posts(t *testing.T) {
 				}
 			}
 		`
-
 		c.MustPost(query, &resp)
-
 		mockPost.AssertExpectations(t)
-
 		require.Len(t, resp.Posts, 2)
-
 		require.Equal(t, "id1", resp.Posts[0].ID)
 		require.Equal(t, "Title1", resp.Posts[0].Title)
 		require.Equal(t, "Content1", resp.Posts[0].Content)
 		require.True(t, resp.Posts[0].CommentsAllowed)
-
 		require.Equal(t, "id2", resp.Posts[1].ID)
 		require.Equal(t, "Title2", resp.Posts[1].Title)
 		require.Equal(t, "Content2", resp.Posts[1].Content)
@@ -114,21 +103,17 @@ func TestQueryResolver_Posts(t *testing.T) {
 
 func TestQueryResolver_Post(t *testing.T) {
 	t.Run("should return post with comments correctly", func(t *testing.T) {
-		mockPost := mocks.NewPost(t)
-		mockComment := mocks.NewComment(t)
+		mockPost := mocks.NewPostInterface(t)
+		mockComment := mocks.NewCommentInterface(t)
 
 		postID := "test-post-id"
-
-		// Мокируем возврат одного поста
-		mockPost.On("GetPost", mock.Anything, mock.Anything, postID).Return(&posts.Posts{
+		mockPost.On("GetPost", mock.Anything, postID).Return(&models.Post{
 			ID:              postID,
 			Title:           "Test Title",
 			Content:         "Test Content",
 			CommentsAllowed: true,
 		}, nil)
-
-		// Мокируем возврат комментариев для поста
-		mockComments := []comments.Comments{
+		mockComments := []models.Comment{
 			{
 				ID:        "comment1",
 				PostID:    postID,
@@ -144,9 +129,9 @@ func TestQueryResolver_Post(t *testing.T) {
 				CreatedAt: time.Now(),
 			},
 		}
-
-		mockComment.On("GetComments", mock.Anything, mock.Anything, postID, mock.Anything, mock.Anything).
-			Return(mockComments, "endCursor", false, nil)
+		mockComment.On("CheckCommentId", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		mockComment.On("GetComments", mock.Anything, postID, mock.Anything, mock.Anything).
+			Return(&mockComments, "endCursor", false, nil)
 
 		resolver := &graph.Resolver{
 			Post_:    mockPost,
@@ -179,7 +164,6 @@ func TestQueryResolver_Post(t *testing.T) {
 				}
 			}
 		}
-
 		query := fmt.Sprintf(`
 			query {
 				post(id: "%s") {
@@ -206,23 +190,18 @@ func TestQueryResolver_Post(t *testing.T) {
 		`, postID)
 
 		c.MustPost(query, &resp)
-
 		mockPost.AssertExpectations(t)
 		mockComment.AssertExpectations(t)
-
 		require.Equal(t, postID, resp.Post.ID)
 		require.Equal(t, "Test Title", resp.Post.Title)
 		require.Equal(t, "Test Content", resp.Post.Content)
 		require.True(t, resp.Post.CommentsAllowed)
-
 		require.Len(t, resp.Post.Comments.Edges, 2)
 		require.Equal(t, "comment1", resp.Post.Comments.Edges[0].Node.ID)
 		require.Equal(t, "Comment 1", resp.Post.Comments.Edges[0].Node.Text)
-
 		require.Equal(t, "comment2", resp.Post.Comments.Edges[1].Node.ID)
 		require.Equal(t, "comment1", *resp.Post.Comments.Edges[1].Node.ParentID)
 		require.Equal(t, "Comment 2", resp.Post.Comments.Edges[1].Node.Text)
-
 		require.NotNil(t, resp.Post.Comments.EndCursor)
 		require.False(t, resp.Post.Comments.HasNextPage)
 	})

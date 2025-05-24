@@ -34,6 +34,7 @@ type Post struct {
 	Content         string             `json:"content"`
 	CommentsAllowed bool               `json:"commentsAllowed"`
 	Comments        *CommentConnection `json:"comments"`
+	CreatedAt       time.Time          `json:"createdAt"`
 }
 
 type Query struct {

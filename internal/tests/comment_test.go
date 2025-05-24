@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
+	models "subscriptions/internal/domain"
 	"subscriptions/internal/graphql/graph"
 	generated "subscriptions/internal/graphql/graph"
 	"subscriptions/internal/graphql/graph/mocks"
 	"subscriptions/internal/graphql/graph/model"
-	"subscriptions/internal/services/comments"
-	"subscriptions/internal/services/posts"
+
 	"subscriptions/internal/storage/postgres"
 
 	"github.com/99designs/gqlgen/client"
@@ -24,24 +24,20 @@ import (
 
 func TestMutationResolver_CreateComment(t *testing.T) {
 	t.Run("should create comment correctly", func(t *testing.T) {
-		mockComment := mocks.NewComment(t)
-		mockPost := mocks.NewPost(t)
-
+		mockComment := mocks.NewCommentInterface(t)
+		mockPost := mocks.NewPostInterface(t)
 		postID := "post-123"
 		parentID := "parent-456"
 		text := "This is a comment"
-
-		mockPost.On("GetPost", mock.Anything, mock.Anything, postID).Return(&posts.Posts{
+		mockPost.On("GetPost", mock.Anything, postID).Return(&models.Post{
 			ID:              postID,
 			Title:           "Title",
 			Content:         "Content",
 			CommentsAllowed: true,
 		}, nil)
 
-		mockComment.On("CheckCommentId", mock.Anything, mock.Anything, parentID).Return(nil)
-
-		mockComment.On("SaveComment", mock.Anything, mock.Anything, mock.Anything).Return("comment-id-789", nil)
-
+		mockComment.On("CheckCommentId", mock.Anything, &parentID, mock.Anything).Return(nil)
+		mockComment.On("SaveComment", mock.Anything, mock.Anything).Return("comment-id-789", nil)
 		resolver := &graph.Resolver{
 			Post_:                    mockPost,
 			Comment_:                 mockComment,
@@ -49,7 +45,6 @@ func TestMutationResolver_CreateComment(t *testing.T) {
 			Logger:                   slog.New(slog.NewTextHandler(io.Discard, nil)),
 			CommentAddedNotification: make(chan *model.Comment, 1),
 		}
-
 		c := client.New(handler.NewDefaultServer(generated.NewExecutableSchema(generated.Config{Resolvers: resolver})))
 
 		var resp struct {
@@ -60,7 +55,6 @@ func TestMutationResolver_CreateComment(t *testing.T) {
 				Text     string
 			}
 		}
-
 		mutation := fmt.Sprintf(`
 			mutation {
 				createComment(postID: "%s", parentID: "%s", text: "%s") {
@@ -73,10 +67,8 @@ func TestMutationResolver_CreateComment(t *testing.T) {
 		`, postID, parentID, text)
 
 		c.MustPost(mutation, &resp)
-
 		mockPost.AssertExpectations(t)
 		mockComment.AssertExpectations(t)
-
 		require.Equal(t, "comment-id-789", resp.CreateComment.ID)
 		require.Equal(t, postID, resp.CreateComment.PostID)
 		require.NotNil(t, resp.CreateComment.ParentID)
@@ -87,14 +79,13 @@ func TestMutationResolver_CreateComment(t *testing.T) {
 
 func TestComment_CheckCommentId(t *testing.T) {
 	t.Run("should check comment id without error", func(t *testing.T) {
-		mockComment := mocks.NewComment(t)
-		storage := new(postgres.Storage)
+		mockComment := mocks.NewCommentInterface(t)
 		ctx := context.Background()
 		commentID := "comment-123"
+		postId := "postId-123"
+		mockComment.On("CheckCommentId", ctx, &commentID, postId).Return(nil)
 
-		mockComment.On("CheckCommentId", ctx, storage, commentID).Return(nil)
-
-		err := mockComment.CheckCommentId(ctx, storage, commentID)
+		err := mockComment.CheckCommentId(ctx, &commentID, postId)
 
 		require.NoError(t, err)
 		mockComment.AssertExpectations(t)
@@ -103,15 +94,12 @@ func TestComment_CheckCommentId(t *testing.T) {
 
 func TestComment_GetComments(t *testing.T) {
 	t.Run("should get comments correctly", func(t *testing.T) {
-		mockComment := mocks.NewComment(t)
-		storage := new(postgres.Storage)
+		mockComment := mocks.NewCommentInterface(t)
 		ctx := context.Background()
-
 		postID := "post-123"
 		var first *int32 = nil
 		var after *string = nil
-
-		mockComments := []comments.Comments{
+		mockComments := []models.Comment{
 			{
 				ID:        "c1",
 				PostID:    postID,
@@ -127,17 +115,13 @@ func TestComment_GetComments(t *testing.T) {
 				CreatedAt: time.Now(),
 			},
 		}
-
-		mockComment.On("GetComments", ctx, storage, postID, first, after).
-			Return(mockComments, "cursor123", true, nil)
-
-		comments, cursor, hasNext, err := mockComment.GetComments(ctx, storage, postID, first, after)
-
+		mockComment.On("GetComments", ctx, postID, first, after).
+			Return(&mockComments, "cursor123", true, nil)
+		comments, cursor, hasNext, err := mockComment.GetComments(ctx, postID, first, after)
 		require.NoError(t, err)
-		require.Equal(t, mockComments, comments)
+		require.Equal(t, &mockComments, comments)
 		require.Equal(t, "cursor123", cursor)
 		require.True(t, hasNext)
-
 		mockComment.AssertExpectations(t)
 	})
 }

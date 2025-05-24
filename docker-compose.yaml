@@ -22,6 +22,7 @@ services:
       - POSTGRES_HOST=postgres
       - POSTGRES_ADDRESS=postgres:5432
       - APP_PORT=${APP_PORT}
+      - STORAGE_TYPE=${STORAGE_TYPE}
     ports:
       - "${APP_PORT}:${APP_PORT}"
 

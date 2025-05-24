@@ -7,11 +7,13 @@ import (
 	"subscriptions/internal/config"
 	"subscriptions/internal/graphql/graph"
 	"subscriptions/internal/graphql/graph/model"
+	"subscriptions/internal/lib/locks"
 	"subscriptions/internal/lib/logger/handlers/slogpretty"
-	"subscriptions/internal/services/comments"
-	"subscriptions/internal/services/posts"
+	"subscriptions/internal/services"
+	inmemory "subscriptions/internal/storage/in_memory"
 	"subscriptions/internal/storage/postgres"
 	"syscall"
+	"time"
 
 	"golang.org/x/exp/slog"
 
@@ -45,24 +47,39 @@ func main() {
 	if port == "" {
 		port = defaultPort
 	}
-	// var storage Storage
-	// if storageType == "in-memory" {
-	// 	storage := inmemory.NewInMemoryStorage()
-	// } else {
-	storage, err := postgres.InitDB(cfg.StoragePath, cfg.DBSaver)
-	if err != nil {
-		log.Error("failed to initialize database", err)
-	}
-	defer storage.CloseDB()
-	// }
+	lock := locks.NewLocks()
+	var srv *handler.Server
 
-	post := &posts.Posts{}
-	comment := &comments.Comments{}
-	srv := handler.New(graph.NewExecutableSchema(graph.Config{Resolvers: &graph.Resolver{Logger: log, CommentAddedNotification: make(chan *model.Comment, 1), Storage: storage, Post_: post, Comment_: comment}}))
+	if cfg.StorageType == "in-memory" {
+
+		storage, err := inmemory.NewStorage(cfg.StoragePath, cfg.DBSaver)
+		if err != nil {
+			log.Error("failed to initialize in-memory database", err)
+			os.Exit(1)
+		}
+		srv = handler.New(graph.NewExecutableSchema(graph.Config{Resolvers: &graph.Resolver{Logger: log, CommentAddedNotification: make(chan *model.Comment, 1), Storage: storage, Post_: storage, Comment_: storage, Lock: lock}}))
+
+	} else if cfg.StorageType == "postgres" {
+
+		storage, err := postgres.NewStorage(cfg.StoragePath, cfg.DBSaver)
+		if err != nil {
+			log.Error("failed to initialize pg database", err)
+			os.Exit(1)
+		}
+		defer storage.CloseDB()
+		post := services.NewPost(storage.Db)
+		comment := services.NewComment(storage.Db)
+		srv = handler.New(graph.NewExecutableSchema(graph.Config{Resolvers: &graph.Resolver{Logger: log, CommentAddedNotification: make(chan *model.Comment, 1), Storage: storage, Post_: post, Comment_: comment, Lock: lock}}))
+	} else {
+		os.Exit(1)
+	}
+
 	srv.AddTransport(transport.Options{})
 	srv.AddTransport(transport.GET{})
 	srv.AddTransport(transport.POST{})
-	// srv.AddTransport()
+	srv.AddTransport(transport.Websocket{
+		KeepAlivePingInterval: 10 * time.Second,
+	})
 	srv.SetQueryCache(lru.New[*ast.QueryDocument](1000))
 	srv.Use(extension.Introspection{})
 	srv.Use(extension.AutomaticPersistedQuery{Cache: lru.New[string](100)})

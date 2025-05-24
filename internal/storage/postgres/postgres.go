@@ -18,7 +18,7 @@ type Storage struct {
 	Db *pg.DB
 }
 
-func InitDB(storagePath string, cfg config.DBSaver) (*Storage, error) {
+func NewStorage(storagePath string, cfg config.DBSaver) (*Storage, error) {
 	const op = "storage.postgres.New"
 
 	conn := pg.Connect(&pg.Options{
@@ -41,16 +41,16 @@ func InitDB(storagePath string, cfg config.DBSaver) (*Storage, error) {
 	obj := &Storage{
 		Db: conn,
 	}
-	if err := obj.migrateSchema(); err != nil {
+	if err := migrateSchema(obj); err != nil {
 		return nil, fmt.Errorf("failed to migrate schema: %w", err)
 	}
 	return obj, nil
 }
 
-func (s *Storage) migrateSchema() error {
+func migrateSchema(s *Storage) error {
 	schemas := []interface{}{
-		(*models.Posts)(nil),
-		(*models.Comments)(nil),
+		(*models.Post)(nil),
+		(*models.Comment)(nil),
 	}
 
 	op := orm.CreateTableOptions{IfNotExists: true}
